@@ -1,13 +1,20 @@
 package se.solidbeans;
 
 import javax.xml.bind.DatatypeConverter;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.nio.file.FileVisitResult.CONTINUE;
@@ -15,28 +22,24 @@ import static java.nio.file.FileVisitResult.CONTINUE;
 public class IDup extends SimpleFileVisitor<Path> {
 
     private Map<Path, Long> files = new HashMap<>();
-    private Map<Path, Set<Path>> duplicates = new ConcurrentHashMap<>();
+    private Map<Path, Set<Path>> duplicates = new ConcurrentSkipListMap<>();
+    private Integer dotcount;
 
     public static void main(String[] args) throws IOException {
         IDup iDup = new IDup();
         Path startingDir = Paths.get(args[0]);
+        System.out.println("Reading files "+args[0]);
         Files.walkFileTree(startingDir, iDup);
+        System.out.println("Finding duplicates...");
         iDup.findDuplicates();
         iDup.print();
     }
 
-    private void print() {
-        System.out.println("Antal duplikat: "+duplicates.size()+". Antal filer: "+files.size());
-    }
-
     private void findDuplicates() {
         long date = new Date().getTime();
-
-        files.entrySet().parallelStream().forEach(set -> findDuplicates(set.getKey(), getDupCandidates(set)));
-
+        files.entrySet().parallelStream().forEach(entry -> findDuplicates(entry.getKey(), getDupCandidates(entry)));
         long diff = new Date().getTime() - date;
-        System.out.println("tog: "+diff);
-
+        System.out.println("\n2"+TimeUnit.MILLISECONDS.toSeconds(diff));
     }
 
     private void findDuplicates(Path currentFileKey, Map<Path, String> dupCandidates) {
@@ -46,9 +49,14 @@ public class IDup extends SimpleFileVisitor<Path> {
                 .collect(Collectors.toSet());
         if (!dup.isEmpty()) {
             this.duplicates.put(currentFileKey, dup);
-            System.out.println();
-            System.out.println(currentFileKey.toString());
-            dup.forEach(x -> System.out.println("       "+x));
+            if (dotcount == null) {
+                dotcount = 0;
+            } else if (dotcount == 80) {
+                System.out.println();
+                dotcount =0;
+            }
+            dotcount++;
+            System.out.print(".");
         }
     }
 
@@ -88,11 +96,32 @@ public class IDup extends SimpleFileVisitor<Path> {
         MessageDigest md = null;
         try {
             md = MessageDigest.getInstance("SHA1");
-            md.update(Files.readAllBytes(file));
-        } catch (NoSuchAlgorithmException | IOException e) {
+            FileInputStream fileInputStream = new FileInputStream(file.toFile());
+            FileChannel channel = fileInputStream.getChannel();
+            ByteBuffer buffer = ByteBuffer.allocate(4096);
+            while (channel.read(buffer) != -1) {
+                buffer.flip();
+                md.update(buffer);
+                buffer.clear();
+            }
+            fileInputStream.close();
+        } catch (NoSuchAlgorithmException | OutOfMemoryError | IOException e) {
+            System.out.println("Stor fil: " +file.toString());
             e.printStackTrace();
         }
         return DatatypeConverter
                 .printHexBinary(md.digest());
+    }
+
+    private void print() {
+        duplicates.entrySet().forEach(this::printEntry);
+        System.out.println("Antal duplikat: "+duplicates.size()+". Antal filer: "+files.size());
+    }
+
+    private void printEntry(Map.Entry<Path, Set<Path>> e) {
+        System.out.println();
+        System.out.println(e.getKey().toString());
+        e.getValue().forEach(v -> System.out.println("            "+v.toString()));
+        System.out.println();
     }
 }
