@@ -61,7 +61,7 @@ public class IDup extends SimpleFileVisitor<Path> {
     }
 
     private Map<Path, String> getDupCandidates(Map.Entry<Path, Long> entry) {
-        Map<Path, String> candiates = new HashMap<>();
+        Map<Path, String> candiates = new ConcurrentSkipListMap<>();
         files.entrySet().parallelStream()
                 .filter(candidate -> isNewDuplicate(candidate, entry))
                 .forEach(candidate -> candiates.put(candidate.getKey(), calcChecksum(candidate.getKey())));
@@ -70,10 +70,10 @@ public class IDup extends SimpleFileVisitor<Path> {
 
     private boolean isNewDuplicate(Map.Entry<Path, Long> candidate, Map.Entry<Path, Long> entry) {
         return entry != candidate && entry.getValue().equals(candidate.getValue()) &&
-                !(isDuplicate(candidate) || isDuplicate(entry));
+                !(isAlreadyFoundDuplicate(candidate) || isAlreadyFoundDuplicate(entry));
     }
 
-    private boolean isDuplicate(Map.Entry<Path, Long> set) {
+    private boolean isAlreadyFoundDuplicate(Map.Entry<Path, Long> set) {
         return duplicates.containsKey(set.getKey()) ||
                 duplicates.values().stream().anyMatch(dupSet -> dupSet.contains(set.getKey()));
     }
